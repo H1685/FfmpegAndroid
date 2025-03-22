@@ -36,15 +36,34 @@ jobs:
           libfreetype6-dev \
           libfontconfig1-dev \
           fontconfig \
-          libfontconfig-dev
+          libfontconfig-dev \
+          cmake
+
+        # Verify fontconfig installation and pkg-config setup
+        pkg-config --exists fontconfig || echo "fontconfig not found in pkg-config"
+        echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+        pkg-config --libs fontconfig || echo "Failed to get fontconfig libs"
+        pkg-config --cflags fontconfig || echo "Failed to get fontconfig cflags"
+        
+        # Show where fontconfig files are located
+        dpkg -L libfontconfig1-dev
+        dpkg -L fontconfig
+
+    - name: Build fontconfig from source
+      run: |
+        git clone https://gitlab.freedesktop.org/fontconfig/fontconfig.git
+        cd fontconfig
+        ./autogen.sh
+        ./configure --prefix=/usr
+        make
+        sudo make install
+        pkg-config --modversion fontconfig
 
     - name: Set up Android NDK
       run: |
         wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
         unzip -q android-ndk-r23b-linux.zip
         echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-r23b" >> $GITHUB_ENV
-        # Verify NDK tools are present
-        ls -la $GITHUB_WORKSPACE/android-ndk-r23b/toolchains/llvm/prebuilt/linux-x86_64/bin/
     
     - name: Download FFmpeg source
       run: |
@@ -64,14 +83,12 @@ jobs:
         export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
         export API_LEVEL=21
         
-        # Verify toolchain exists
-        if [ ! -d "$TOOLCHAIN" ]; then
-          echo "Error: Toolchain directory not found: $TOOLCHAIN"
-          exit 1
-        fi
+        # Set up pkg-config path explicitly
+        export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
         
-        # Export PKG_CONFIG_PATH for fontconfig
-        export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig"
+        # Debug information
+        echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+        ls -l /usr/lib/x86_64-linux-gnu/pkgconfig/fontconfig.pc || echo "fontconfig.pc not found in expected location"
         
         # Configure for arm64-v8a with optimizations for modern devices
         ./configure \
@@ -108,8 +125,9 @@ jobs:
           --cc=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL-clang \
           --cxx=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL-clang++ \
           --nm=$TOOLCHAIN/bin/llvm-nm \
-          --extra-cflags="-Os -fpic" \
-          --extra-ldflags="-pie"
+          --extra-cflags="-Os -fpic -I/usr/include/fontconfig -I/usr/include" \
+          --extra-ldflags="-pie -L/usr/lib/x86_64-linux-gnu" \
+          --pkg-config=pkg-config
         
         make -j$(nproc)
         make install
