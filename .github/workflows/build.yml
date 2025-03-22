@@ -33,10 +33,6 @@ jobs:
           build-essential \
           pkg-config \
           yasm \
-          libfreetype6-dev \
-          libfontconfig1-dev \
-          fontconfig \
-          libfontconfig-dev \
           cmake
 
     - name: Set up Android NDK
@@ -69,6 +65,8 @@ jobs:
         export PATH=$TOOLCHAIN/bin:$PATH
         export API_LEVEL=21
         export TARGET_TRIPLE=aarch64-linux-android
+        
+        # Set up compiler and tools
         export CC=$TOOLCHAIN/bin/$TARGET_TRIPLE$API_LEVEL-clang
         export CXX=$TOOLCHAIN/bin/$TARGET_TRIPLE$API_LEVEL-clang++
         export AR=$TOOLCHAIN/bin/llvm-ar
@@ -76,10 +74,15 @@ jobs:
         export NM=$TOOLCHAIN/bin/llvm-nm
         export STRIP=$TOOLCHAIN/bin/llvm-strip
         export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+        export LD=$TOOLCHAIN/bin/ld
         
-        # Test compiler
-        echo "Testing compiler..."
+        # Create symlink for strip
+        ln -sf $TOOLCHAIN/bin/llvm-strip $TOOLCHAIN/bin/$TARGET_TRIPLE$API_LEVEL-strip
+        
+        # Test compiler and tools
+        echo "Testing compiler and tools..."
         $CC -v
+        $STRIP --version
         
         # Configure for arm64-v8a with optimizations for modern devices
         ./configure \
@@ -117,7 +120,8 @@ jobs:
           --cross-prefix=$TOOLCHAIN/bin/$TARGET_TRIPLE$API_LEVEL- \
           --sysroot=$TOOLCHAIN/sysroot \
           --extra-cflags="-Os -fPIC" \
-          --extra-ldflags="-pie"
+          --extra-ldflags="-pie" \
+          --strip=$TOOLCHAIN/bin/llvm-strip
         
         make -j$(nproc)
         make install
