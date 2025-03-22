@@ -37,42 +37,18 @@ jobs:
           libfontconfig1-dev \
           fontconfig \
           libfontconfig-dev \
-          cmake \
-          gperf \
-          gettext \
-          autopoint \
-          automake \
-          libtool \
-          autoconf \
-          libuuid1 \
-          uuid-dev
-
-        # Verify fontconfig installation and pkg-config setup
-        pkg-config --exists fontconfig || echo "fontconfig not found in pkg-config"
-        echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-        pkg-config --libs fontconfig || echo "Failed to get fontconfig libs"
-        pkg-config --cflags fontconfig || echo "Failed to get fontconfig cflags"
-        
-        # Show where fontconfig files are located
-        dpkg -L libfontconfig1-dev
-        dpkg -L fontconfig
-
-    - name: Build fontconfig from source
-      run: |
-        git clone https://gitlab.freedesktop.org/fontconfig/fontconfig.git
-        cd fontconfig
-        ./autogen.sh --sysconfdir=/etc --prefix=/usr --mandir=/usr/share/man
-        ./configure --sysconfdir=/etc --prefix=/usr --mandir=/usr/share/man
-        make
-        sudo make install
-        sudo ldconfig
-        pkg-config --modversion fontconfig
+          cmake
 
     - name: Set up Android NDK
       run: |
         wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
         unzip -q android-ndk-r23b-linux.zip
         echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-r23b" >> $GITHUB_ENV
+        
+        # Verify NDK tools
+        ls -la $GITHUB_WORKSPACE/android-ndk-r23b/toolchains/llvm/prebuilt/linux-x86_64/bin/
+        # Make sure compiler is executable
+        chmod +x $GITHUB_WORKSPACE/android-ndk-r23b/toolchains/llvm/prebuilt/linux-x86_64/bin/*
     
     - name: Download FFmpeg source
       run: |
@@ -90,14 +66,20 @@ jobs:
       run: |
         cd $FFMPEG_SOURCE
         export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+        export PATH=$TOOLCHAIN/bin:$PATH
         export API_LEVEL=21
+        export TARGET_TRIPLE=aarch64-linux-android
+        export CC=$TOOLCHAIN/bin/$TARGET_TRIPLE$API_LEVEL-clang
+        export CXX=$TOOLCHAIN/bin/$TARGET_TRIPLE$API_LEVEL-clang++
+        export AR=$TOOLCHAIN/bin/llvm-ar
+        export AS=$CC
+        export NM=$TOOLCHAIN/bin/llvm-nm
+        export STRIP=$TOOLCHAIN/bin/llvm-strip
+        export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
         
-        # Set up pkg-config path explicitly
-        export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-        
-        # Debug information
-        echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-        ls -l /usr/lib/x86_64-linux-gnu/pkgconfig/fontconfig.pc || echo "fontconfig.pc not found in expected location"
+        # Test compiler
+        echo "Testing compiler..."
+        $CC -v
         
         # Configure for arm64-v8a with optimizations for modern devices
         ./configure \
@@ -108,9 +90,6 @@ jobs:
           --disable-static \
           --enable-shared \
           --disable-everything \
-          --enable-libfreetype \
-          --enable-libfontconfig \
-          --enable-filter=drawtext \
           --enable-filter=overlay \
           --enable-protocol=file \
           --enable-avcodec \
@@ -127,16 +106,18 @@ jobs:
           --enable-muxer=mov \
           --enable-parser=png \
           --disable-debug \
+          --disable-doc \
+          --disable-htmlpages \
+          --disable-manpages \
+          --disable-podpages \
+          --disable-txtpages \
           --enable-cross-compile \
           --target-os=android \
           --arch=aarch64 \
-          --cross-prefix=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL- \
-          --cc=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL-clang \
-          --cxx=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL-clang++ \
-          --nm=$TOOLCHAIN/bin/llvm-nm \
-          --extra-cflags="-Os -fpic -I/usr/include/fontconfig -I/usr/include" \
-          --extra-ldflags="-pie -L/usr/lib/x86_64-linux-gnu" \
-          --pkg-config=pkg-config
+          --cross-prefix=$TOOLCHAIN/bin/$TARGET_TRIPLE$API_LEVEL- \
+          --sysroot=$TOOLCHAIN/sysroot \
+          --extra-cflags="-Os -fPIC" \
+          --extra-ldflags="-pie"
         
         make -j$(nproc)
         make install
@@ -151,11 +132,10 @@ jobs:
         cat > $OUTPUT_DIR/README.md << 'EOF'
         # Custom FFmpeg Build for Modern Android Phones
         
-        This is a custom FFmpeg build optimized for text and PNG overlay capabilities on modern Android phones (Samsung, Xiaomi, etc.).
+        This is a custom FFmpeg build optimized for PNG overlay capabilities on modern Android phones (Samsung, Xiaomi, etc.).
         
         ## Features
         
-        - Text overlay using drawtext filter
         - PNG overlay support
         - Minimal build with only required components
         - Optimized for arm64-v8a architecture used in modern Android devices
