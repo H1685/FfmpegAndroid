@@ -37,7 +37,15 @@ jobs:
           libfontconfig1-dev \
           fontconfig \
           libfontconfig-dev \
-          cmake
+          cmake \
+          gperf \
+          gettext \
+          autopoint \
+          automake \
+          libtool \
+          autoconf \
+          libuuid1 \
+          uuid-dev
 
         # Verify fontconfig installation and pkg-config setup
         pkg-config --exists fontconfig || echo "fontconfig not found in pkg-config"
@@ -53,10 +61,11 @@ jobs:
       run: |
         git clone https://gitlab.freedesktop.org/fontconfig/fontconfig.git
         cd fontconfig
-        ./autogen.sh
-        ./configure --prefix=/usr
+        ./autogen.sh --sysconfdir=/etc --prefix=/usr --mandir=/usr/share/man
+        ./configure --sysconfdir=/etc --prefix=/usr --mandir=/usr/share/man
         make
         sudo make install
+        sudo ldconfig
         pkg-config --modversion fontconfig
 
     - name: Set up Android NDK
