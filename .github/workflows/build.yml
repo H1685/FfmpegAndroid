@@ -1,0 +1,162 @@
+name: Build FFmpeg for Modern Android Phones
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    # Allow manual trigger
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      
+    - name: Set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config yasm libfreetype6-dev libfontconfig1-dev
+
+    - name: Set up Android NDK
+      run: |
+        wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
+        unzip -q android-ndk-r23b-linux.zip
+        echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-r23b" >> $GITHUB_ENV
+    
+    - name: Download FFmpeg source
+      run: |
+        FFMPEG_VERSION="5.1.2"
+        wget -q https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.bz2
+        tar xjf ffmpeg-$FFMPEG_VERSION.tar.bz2
+        echo "FFMPEG_SOURCE=$GITHUB_WORKSPACE/ffmpeg-$FFMPEG_VERSION" >> $GITHUB_ENV
+    
+    - name: Create output directory
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/ffmpeg-android-build
+        echo "OUTPUT_DIR=$GITHUB_WORKSPACE/ffmpeg-android-build" >> $GITHUB_ENV
+    
+    - name: Build FFmpeg for arm64-v8a (Modern Phones)
+      run: |
+        cd $FFMPEG_SOURCE
+        export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+        export API_LEVEL=21
+        
+        # Configure for arm64-v8a with optimizations for modern devices
+        ./configure \
+          --prefix=$OUTPUT_DIR/arm64-v8a \
+          --enable-small \
+          --disable-programs \
+          --disable-doc \
+          --disable-static \
+          --enable-shared \
+          --disable-everything \
+          --enable-libfreetype \
+          --enable-libfontconfig \
+          --enable-filter=drawtext \
+          --enable-filter=overlay \
+          --enable-protocol=file \
+          --enable-avcodec \
+          --enable-avformat \
+          --enable-avfilter \
+          --enable-avutil \
+          --enable-swscale \
+          --enable-decoder=png \
+          --enable-decoder=mjpeg \
+          --enable-encoder=png \
+          --enable-demuxer=image2 \
+          --enable-muxer=image2 \
+          --enable-muxer=mp4 \
+          --enable-muxer=mov \
+          --enable-parser=png \
+          --disable-debug \
+          --enable-cross-compile \
+          --target-os=android \
+          --arch=aarch64 \
+          --cross-prefix=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL- \
+          --cc=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL-clang \
+          --cxx=$TOOLCHAIN/bin/aarch64-linux-android$API_LEVEL-clang++ \
+          --extra-cflags="-Os -fpic" \
+          --extra-ldflags="-pie"
+        
+        make -j$(nproc)
+        make install
+
+    - name: Create include directory
+      run: |
+        mkdir -p $OUTPUT_DIR/include
+        cp -r $OUTPUT_DIR/arm64-v8a/include/* $OUTPUT_DIR/include/
+
+    - name: Create README
+      run: |
+        cat > $OUTPUT_DIR/README.md << 'EOF'
+        # Custom FFmpeg Build for Modern Android Phones
+        
+        This is a custom FFmpeg build optimized for text and PNG overlay capabilities on modern Android phones (Samsung, Xiaomi, etc.).
+        
+        ## Features
+        
+        - Text overlay using drawtext filter
+        - PNG overlay support
+        - Minimal build with only required components
+        - Optimized for arm64-v8a architecture used in modern Android devices
+        
+        ## Usage
+        
+        1. Copy the `.so` files from the arm64-v8a folder to your Android project's `jniLibs/arm64-v8a` directory
+        2. Include the headers for NDK development
+        
+        ## Supported Devices
+        
+        This build targets modern Android phones including:
+        - Samsung Galaxy (S and Note series from 2016 onwards)
+        - Xiaomi (Mi, Redmi, POCO series)
+        - OnePlus 
+        - Other devices using 64-bit ARM processors
+        EOF
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ffmpeg-android-build
+        path: ${{ env.OUTPUT_DIR }}
+
+    - name: Archive build
+      run: |
+        cd $GITHUB_WORKSPACE
+        tar -czvf ffmpeg-android-build.tar.gz -C $OUTPUT_DIR .
+        
+    - name: Commit built libraries
+      run: |
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+        
+        # Create release directory if not exists
+        mkdir -p releases
+        
+        # Move the archive to releases folder
+        mv ffmpeg-android-build.tar.gz releases/
+        
+        # Commit changes
+        git add releases/ffmpeg-android-build.tar.gz
+        
+        # Create version file with timestamp
+        BUILD_DATE=$(date '+%Y%m%d-%H%M%S')
+        echo "Build: $BUILD_DATE" > releases/version.txt
+        git add releases/version.txt
+        
+        git commit -m "Add FFmpeg build for modern Android phones $BUILD_DATE"
+        git push
